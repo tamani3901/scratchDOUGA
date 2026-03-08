@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Scratch Video RLE Converter</title>
+<style>
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        text-align: center;
+        background: #222;
+        color: #fff;
+        padding: 20px;
+        margin: 0;
+    }
+    .container {
+        position: relative;
+        background: #333;
+        padding: 30px;
+        border-radius: 15px;
+        display: inline-block;
+        border: 2px solid #4C97FF;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    h2 { margin-top: 0; color: #4C97FF; }
+    canvas {
+        border: 2px solid #555;
+        background: white;
+        image-rendering: pixelated;
+        margin: 20px 0;
+        max-width: 100%;
+    }
+    .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        text-align: left;
+        margin-bottom: 20px;
+    }
+    .control-group { display: flex; flex-direction: column; }
+    label { font-size: 12px; color: #aaa; margin-bottom: 5px; }
+    
+    button, select, input[type="file"] {
+        background: #4C97FF;
+        color: white;
+        border: none;
+        padding: 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: bold;
+    }
+    button:hover { background: #3373cc; }
+    button:disabled, select:disabled {
+        background: #777;
+        cursor: not-allowed;
+    }
+
+    .fps-unlock {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        font-size: 11px;
+        padding: 5px 8px;
+        background: #555;
+    }
+    .fps-unlock.active { background: #ff4c4c; }
+
+    .warning {
+        grid-column: 1 / span 2;
+        color: #ff6666;
+        font-size: 12px;
+        margin-top: 5px;
+        display: none;
+        border: 1px solid #ff6666;
+        padding: 5px;
+        border-radius: 4px;
+    }
+    #status {
+        margin-top: 15px;
+        font-weight: bold;
+        color: #FFAB19;
+    }
+    .info-text {
+        font-size: 12px;
+        color: #888;
+        margin-bottom: 15px;
+    }
+</style>
+</head>
+
+<body>
+<div class="container">
+    <button id="fpsUnlockBtn" class="fps-unlock">FPS制限: ON</button>
+
+    <h2>Scratch Video Converter</h2>
+    <p class="info-text">圧縮形式: [H, S, V, Count] 4要素セット</p>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>解像度</label>
+            <select id="resolution">
+                <option value="360">360 × 360 (重い)</option>
+                <option value="180" selected>180 × 180 (推奨)</option>
+                <option value="120">120 × 120 (高速)</option>
+                <option value="60">60 × 60 (軽量)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>変換秒数</label>
+            <select id="timeLimit">
+                <option value="5">5秒</option>
+                <option value="10" selected>10秒</option>
+                <option value="15">15秒</option>
+                <option value="auto">可変（最大20秒）</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>FPS</label>
+            <select id="fpsSelect">
+                <option value="10">10 fps</option>
+                <option value="15">15 fps</option>
+                <option value="24">24 fps</option>
+                <option value="30">30 fps</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>動画ファイル</label>
+            <input type="file" id="upload" accept="video/*">
+        </div>
+
+        <div id="fpsWarning" class="warning">
+            ⚠ 360pxでの高FPSはScratchのリスト上限を超える恐れがあります。
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas><br>
+
+    <button id="downloadBtn" onclick="downloadTxt()" disabled>テキストを保存</button>
+    <p id="status">動画を選択してください</p>
+</div>
+
+<video id="video" style="display:none"></video>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d", { alpha: false });
+const video = document.getElementById("video");
+const status = document.getElementById("status");
+const downloadBtn = document.getElementById("downloadBtn");
+
+const resolutionSelect = document.getElementById("resolution");
+const timeLimitSelect = document.getElementById("timeLimit");
+const fpsSelect = document.getElementById("fpsSelect");
+const fpsUnlockBtn = document.getElementById("fpsUnlockBtn");
+const fpsWarning = document.getElementById("fpsWarning");
+
+let SIZE = 180;
+let fpsUnlocked = false;
+let finalData = [];
+let pixelHeightPerFrame = 0;
+
+// 圧縮用の一時変数
+let lastH = -1, lastS = -1, lastV = -1, runCount = 0;
+
+function updateCanvasAndFPS() {
+    SIZE = Number(resolutionSelect.value);
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    canvas.style.width = "300px"; // プレビューサイズ固定
+    canvas.style.height = "300px";
+
+    if (SIZE === 360 && !fpsUnlocked) {
+        fpsSelect.value = "10";
+        fpsSelect.disabled = true;
+        fpsWarning.style.display = "none";
+    } else {
+        fpsSelect.disabled = false;
+        fpsWarning.style.display = (fpsUnlocked && SIZE >= 180) ? "block" : "none";
+    }
+}
+
+resolutionSelect.addEventListener("change", updateCanvasAndFPS);
+fpsUnlockBtn.addEventListener("click", () => {
+    fpsUnlocked = !fpsUnlocked;
+    fpsUnlockBtn.innerText = fpsUnlocked ? "FPS制限: OFF" : "FPS制限: ON";
+    fpsUnlockBtn.classList.toggle("active", fpsUnlocked);
+    updateCanvasAndFPS();
+});
+
+// 初期実行
+updateCanvasAndFPS();
+
+document.getElementById("upload").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    video.src = URL.createObjectURL(file);
+    video.load();
+
+    video.onloadedmetadata = async () => {
+        const FPS = Number(fpsSelect.value);
+        let selected = timeLimitSelect.value;
+        let maxTime = (selected === "auto") ? Math.min(video.duration, 20) : Math.min(Number(selected), video.duration);
+
+        const totalFrames = Math.floor(maxTime * FPS);
+        
+        // リセット
+        finalData = [];
+        lastH = -1; lastS = -1; lastV = -1; runCount = 0;
+        pixelHeightPerFrame = 0;
+        downloadBtn.disabled = true;
+
+        for (let i = 0; i < totalFrames; i++) {
+            await seekVideo(i / FPS);
+            captureFrame();
+            status.innerText = `処理中: ${i + 1} / ${totalFrames} フレーム`;
+        }
+
+        // 最後に残ったデータをプッシュ
+        if (runCount > 0) {
+            finalData.push(lastH, lastS, lastV, runCount);
+        }
+
+        // ヘッダー情報付与 [FPS, 高さ, 総フレーム数, 0]
+        finalData.unshift(FPS, pixelHeightPerFrame, totalFrames, 0);
+
+        status.innerText = `変換完了！ 要素数: ${finalData.length}`;
+        downloadBtn.disabled = false;
+    };
+});
+
+function seekVideo(time) {
+    return new Promise(resolve => {
+        video.currentTime = time;
+        video.onseeked = () => resolve();
+    });
+}
+
+function captureFrame() {
+    const scale = SIZE / video.videoWidth;
+    const drawHeight = Math.floor(video.videoHeight * scale);
+    const validHeight = Math.min(drawHeight, SIZE);
+
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.drawImage(video, 0, 0, SIZE, drawHeight);
+
+    const imageData = ctx.getImageData(0, 0, SIZE, validHeight);
+    const pixels = imageData.data;
+
+    for (let i = 0; i < pixels.length; i += 4) {
+        const hsv = rgbToScratchHSV(pixels[i], pixels[i+1], pixels[i+2]);
+        
+        // ランレングス圧縮ロジック
+        if (hsv.h === lastH && hsv.s === lastS && hsv.v === lastV) {
+            runCount++;
+        } else {
+            if (lastH !== -1) {
+                finalData.push(lastH, lastS, lastV, runCount);
+            }
+            lastH = hsv.h;
+            lastS = hsv.s;
+            lastV = hsv.v;
+            runCount = 1;
+        }
+    }
+
+    if (pixelHeightPerFrame === 0) pixelHeightPerFrame = validHeight;
+}
+
+function rgbToScratchHSV(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d !== 0) {
+        if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+    }
+    return {
+        h: Math.round((h / 6) * 100),
+        s: Math.round((max === 0 ? 0 : d / max) * 100),
+        v: Math.round(max * 100)
+    };
+}
+
+function downloadTxt() {
+    const blob = new Blob([finalData.join("\n")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `video_data_rle_${Date.now()}.txt`;
+    a.click();
+}
+</script>
+</body>
+</html>
