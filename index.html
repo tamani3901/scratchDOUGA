@@ -2,61 +2,55 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Scratch Video Full Color Converter</title>
+<title>Scratch Video Converter</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <style>
-body {
-    font-family: sans-serif;
-    text-align: center;
-    background: #222;
-    color: #fff;
-    padding: 20px;
-}
-.container {
-    position: relative;
-    background: #333;
-    padding: 20px;
-    border-radius: 10px;
-    display: inline-block;
-    border: 2px solid #4C97FF;
-}
-canvas {
-    border: 1px solid #555;
-    background: white;
-    image-rendering: pixelated;
-    margin: 20px 0;
-}
-button, select {
-    background: #4C97FF;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 16px;
-    font-weight: bold;
-    margin: 5px;
-}
-button:disabled, select:disabled {
-    background: #777;
+body{
+font-family:sans-serif;
+text-align:center;
+background:#222;
+color:#fff;
+padding:20px;
 }
 
-.fps-unlock {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 14px;
-    padding: 6px 10px;
+.container{
+background:#333;
+padding:20px;
+border-radius:10px;
+display:inline-block;
+border:2px solid #4C97FF;
 }
 
-.warning {
-    color: #ff6666;
-    font-size: 14px;
-    margin-top: 10px;
-    display: none;
+canvas{
+border:1px solid #555;
+background:white;
+image-rendering:pixelated;
+margin:20px 0;
 }
+
+button,select{
+background:#4C97FF;
+color:white;
+border:none;
+padding:10px 20px;
+border-radius:5px;
+cursor:pointer;
+font-size:16px;
+margin:5px;
+}
+
+button:disabled,select:disabled{
+background:#777;
+}
+
+.warning{
+color:#ff6666;
+font-size:14px;
+display:none;
+}
+
 </style>
 </head>
 
@@ -64,53 +58,51 @@ button:disabled, select:disabled {
 
 <div class="container">
 
-<button id="fpsUnlockBtn" class="fps-unlock">
-FPSロック解除：OFF
-</button>
-
 <h2>Scratch 動画→テキスト変換</h2>
 
-解像度：
+解像度
 <select id="resolution">
-<option value="360">360 × 360</option>
-<option value="180">180 × 180</option>
+<option value="360">360×360</option>
+<option value="180">180×180</option>
 </select>
 
 <br><br>
 
-変換秒数：
+秒数
 <select id="timeLimit">
 <option value="5">5秒</option>
 <option value="10">10秒</option>
 <option value="15">15秒</option>
 <option value="100">100秒</option>
-<option value="auto">可変（最大20秒）</option>
+<option value="auto">動画長さ(最大100秒)</option>
 </select>
 
 <br><br>
 
-FPS：
+FPS
 <select id="fpsSelect">
-<option value="10">10 fps</option>
-<option value="15">15 fps</option>
-<option value="24">24 fps</option>
+<option value="10">10</option>
+<option value="15">15</option>
+<option value="24">24</option>
 </select>
 
 <div id="fpsWarning" class="warning">
-⚠ 警告<br>
-ファイルサイズが大きくなりサイトがフリーズする可能性あり
+高FPSはブラウザが重くなる可能性があります
 </div>
 
 <br>
 
-<input type="file" id="upload" accept="video/*"><br>
+<input type="file" id="upload" accept="video/*">
 
-<canvas id="canvas"></canvas><br>
+<br>
 
-<button onclick="downloadTxt()">テキスト保存</button>
-<button onclick="downloadMulti()">複数ファイルで保存</button>
+<canvas id="canvas"></canvas>
 
-<p id="status">動画を選択して</p>
+<br>
+
+<button onclick="downloadZip()">ZIP保存</button>
+
+<p id="status">動画を選択</p>
 
 </div>
 
@@ -118,158 +110,51 @@ FPS：
 
 <script>
 
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const video = document.getElementById("video");
-const status = document.getElementById("status");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d",{willReadFrequently:true});
+const video=document.getElementById("video");
+const status=document.getElementById("status");
 
-const resolutionSelect = document.getElementById("resolution");
-const timeLimitSelect = document.getElementById("timeLimit");
-const fpsSelect = document.getElementById("fpsSelect");
+const resolutionSelect=document.getElementById("resolution");
+const timeLimitSelect=document.getElementById("timeLimit");
+const fpsSelect=document.getElementById("fpsSelect");
 
-const fpsUnlockBtn = document.getElementById("fpsUnlockBtn");
-const fpsWarning = document.getElementById("fpsWarning");
+let SIZE=360;
 
-let SIZE = 360;
-let fpsUnlocked = false;
-
-let finalData = [];
-let pixelHeightPerFrame = 0;
-let totalFramesGlobal = 0;
-
-const AUTO_MAX_TIME = 20;
-
-function updateCanvasAndFPS() {
-
-SIZE = Number(resolutionSelect.value);
-
-canvas.width = SIZE;
-canvas.height = SIZE;
-
-if (SIZE === 360 && !fpsUnlocked) {
-fpsSelect.value = "10";
-fpsSelect.disabled = true;
-fpsWarning.style.display = "none";
-}
-else {
-fpsSelect.disabled = false;
-}
-
-}
-
-resolutionSelect.addEventListener("change", updateCanvasAndFPS);
-updateCanvasAndFPS();
-
-fpsUnlockBtn.addEventListener("click", () => {
-
-fpsUnlocked = !fpsUnlocked;
-
-fpsUnlockBtn.innerText =
-fpsUnlocked ? "FPSロック解除：ON" : "FPSロック解除：OFF";
-
-fpsWarning.style.display =
-(fpsUnlocked && SIZE === 360) ? "block" : "none";
-
-updateCanvasAndFPS();
-
+resolutionSelect.addEventListener("change",()=>{
+SIZE=Number(resolutionSelect.value);
+canvas.width=SIZE;
+canvas.height=SIZE;
 });
 
-document.getElementById("upload").addEventListener("change", e => {
+canvas.width=SIZE;
+canvas.height=SIZE;
 
-const file = e.target.files[0];
-if (!file) return;
+let videoLoaded=false;
 
-video.src = URL.createObjectURL(file);
+document.getElementById("upload").addEventListener("change",e=>{
+
+const file=e.target.files[0];
+if(!file)return;
+
+video.src=URL.createObjectURL(file);
 video.load();
 
-video.onloadedmetadata = async () => {
-
-const FPS = (SIZE === 360 && !fpsUnlocked)
-? 10
-: Number(fpsSelect.value);
-
-let selected = timeLimitSelect.value;
-let maxTime;
-
-if (selected === "auto") {
-maxTime = Math.min(video.duration, AUTO_MAX_TIME);
-}
-else if (selected === "100") {
-maxTime = Math.min(100, video.duration);
-}
-else {
-maxTime = Math.min(Number(selected), video.duration);
-}
-
-const totalFrames = Math.floor(maxTime * FPS);
-totalFramesGlobal = totalFrames;
-
-finalData = [];
-pixelHeightPerFrame = 0;
-
-status.innerText = `変換中… ${totalFrames}フレーム`;
-
-for (let i = 0; i < totalFrames; i++) {
-
-await seekVideo(i / FPS);
-captureFrame();
-
-status.innerText = `処理中 ${i+1}/${totalFrames}`;
-
-}
-
-finalData.unshift(totalFramesGlobal);
-finalData.unshift(pixelHeightPerFrame);
-finalData.unshift(FPS);
-
-status.innerText = "変換完了";
-
+video.onloadedmetadata=()=>{
+videoLoaded=true;
+status.innerText="動画読み込み完了";
 };
 
 });
 
-function seekVideo(time) {
+function seekVideo(time){
 
-return new Promise(resolve => {
+return new Promise(resolve=>{
 
-video.currentTime = time;
-video.onseeked = () => resolve();
+video.currentTime=time;
+video.onseeked=()=>resolve();
 
 });
-
-}
-
-function captureFrame() {
-
-const scale = SIZE / video.videoWidth;
-
-const drawHeight = Math.floor(video.videoHeight * scale);
-
-const validHeight = Math.min(drawHeight, SIZE);
-
-ctx.clearRect(0,0,SIZE,SIZE);
-
-ctx.drawImage(video,0,0,SIZE,drawHeight);
-
-const pixels = ctx.getImageData(0,0,SIZE,validHeight).data;
-
-for (let i=0;i<pixels.length;i+=4) {
-
-const hsv = rgbToScratchHSV1(
-pixels[i],
-pixels[i+1],
-pixels[i+2]
-);
-
-finalData.push(hsv.h,hsv.s,hsv.v);
-
-}
-
-if(pixelHeightPerFrame===0){
-
-pixelHeightPerFrame = validHeight;
-
-}
 
 }
 
@@ -287,99 +172,126 @@ let h=0;
 
 if(d!==0){
 
-if(max===r) h=(g-b)/d+(g<b?6:0);
-else if(max===g) h=(b-r)/d+2;
+if(max===r)h=(g-b)/d+(g<b?6:0);
+else if(max===g)h=(b-r)/d+2;
 else h=(r-g)/d+4;
 
 }
 
 return{
-
 h:Math.round((h/6)*100),
 s:Math.round((max===0?0:d/max)*100),
 v:Math.round(max*100)
-
 };
 
 }
 
-function downloadTxt(){
+async function downloadZip(){
 
-const blob=new Blob(
-[finalData.join("\n")],
-{type:"text/plain"}
-);
-
-const a=document.createElement("a");
-
-a.href=URL.createObjectURL(blob);
-
-a.download="scratch_video_data.txt";
-
-a.click();
-
+if(!videoLoaded){
+alert("動画読み込んで");
+return;
 }
-
-async function downloadMulti(){
 
 const zip=new JSZip();
 
-const FPS = finalData[0];
+const FPS=Number(fpsSelect.value);
 
-const perFrameValues =
-SIZE * pixelHeightPerFrame * 3;
+let selected=timeLimitSelect.value;
+let maxTime;
 
-const framesPerFile = FPS * 10;
+if(selected==="auto"){
 
-let dataStart = 3;
+maxTime=Math.min(video.duration,100);
+
+}else{
+
+maxTime=Math.min(Number(selected),video.duration);
+
+}
+
+const totalFrames=Math.floor(maxTime*FPS);
+
+const framesPerFile=FPS*10;
+
+const scale=SIZE/video.videoWidth;
+const drawHeight=Math.floor(video.videoHeight*scale);
+const validHeight=Math.min(drawHeight,SIZE);
+
+let frameIndex=0;
 
 for(let fileIndex=0;fileIndex<10;fileIndex++){
 
-let startFrame = fileIndex * framesPerFile;
+if(frameIndex>=totalFrames)break;
 
-if(startFrame >= totalFramesGlobal) break;
-
-let endFrame = Math.min(
-startFrame + framesPerFile,
-totalFramesGlobal
-);
-
-let valuesStart =
-dataStart + startFrame * perFrameValues;
-
-let valuesEnd =
-dataStart + endFrame * perFrameValues;
-
-let chunk =
-finalData.slice(valuesStart,valuesEnd);
+let data=[];
 
 if(fileIndex===0){
 
-chunk.unshift(totalFramesGlobal);
-chunk.unshift(pixelHeightPerFrame);
-chunk.unshift(FPS);
+data.push(FPS);
+data.push(validHeight);
+data.push(totalFrames);
+
+}
+
+let chunkFrames=Math.min(framesPerFile,totalFrames-frameIndex);
+
+for(let i=0;i<chunkFrames;i++){
+
+await seekVideo(frameIndex/FPS);
+
+ctx.clearRect(0,0,SIZE,SIZE);
+ctx.drawImage(video,0,0,SIZE,drawHeight);
+
+const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
+
+for(let p=0;p<pixels.length;p+=4){
+
+const hsv=rgbToScratchHSV1(
+pixels[p],
+pixels[p+1],
+pixels[p+2]
+);
+
+data.push(hsv.h);
+data.push(hsv.s);
+data.push(hsv.v);
+
+}
+
+frameIndex++;
+
+status.innerText=`処理中 ${frameIndex}/${totalFrames}`;
 
 }
 
 zip.file(
 `video_${fileIndex+1}.txt`,
-chunk.join("\n")
+data.join("\n")
 );
+
+data=null;
 
 }
 
-const blob = await zip.generateAsync({type:"blob"});
+status.innerText="ZIP圧縮中";
+
+const blob=await zip.generateAsync({
+type:"blob",
+compression:"DEFLATE",
+compressionOptions:{level:9}
+});
 
 const a=document.createElement("a");
-
 a.href=URL.createObjectURL(blob);
-
-a.download="scratch_video_split.zip";
-
+a.download="scratch_video.zip";
 a.click();
+
+status.innerText="完了";
 
 }
 
 </script>
+
 </body>
 </html>
