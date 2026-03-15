@@ -2,222 +2,95 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Scratch Video Converter</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<title>Video Converter</title>
 
 <style>
-
 body{
 font-family:sans-serif;
+background:#111;
+color:white;
 text-align:center;
-background:#222;
-color:#fff;
-padding:20px;
-}
-
-.container{
-background:#333;
-padding:20px;
-border-radius:10px;
-display:inline-block;
-border:2px solid #4C97FF;
 }
 
 canvas{
 border:1px solid #555;
-background:white;
-image-rendering:pixelated;
-margin:20px 0;
+margin-top:10px;
 }
 
-button,select{
-background:#4C97FF;
-color:white;
-border:none;
-padding:10px 20px;
-border-radius:5px;
-cursor:pointer;
-font-size:16px;
+button{
 margin:5px;
+padding:10px;
 }
-
 </style>
+
 </head>
 
 <body>
 
-<div class="container">
+<h2>動画 → Scratchデータ変換</h2>
 
-<h2>Scratch 動画→テキスト変換</h2>
-
-解像度
-<select id="resolution">
-<option value="180">180×180</option>
-<option value="360">360×360</option>
-</select>
-
-<br><br>
-
-秒数
-<select id="timeLimit">
-<option value="5">5秒</option>
-<option value="10">10秒</option>
-<option value="15">15秒</option>
-<option value="100">100秒</option>
-<option value="auto">動画長さ(最大100秒)</option>
-</select>
-
-<br><br>
-
-FPS
-<select id="fpsSelect">
-<option value="10">10</option>
-<option value="15">15</option>
-<option value="24">24</option>
-</select>
+<input type="file" id="fileInput" accept="video/*">
+<br>
+<button id="startBtn">変換開始</button>
 
 <br>
-
-<input type="file" id="upload" accept="video/*">
-
-<br>
-
 <canvas id="canvas"></canvas>
-
-<br>
-
-<button onclick="downloadZip()">ZIP保存</button>
-
-<p id="status">動画を選択</p>
-
-</div>
-
-<video id="video" style="display:none"></video>
 
 <script>
 
-const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d",{willReadFrequently:true});
-const video=document.getElementById("video");
+const SIZE = 180;
+const FPS = 24;
 
-const resolutionSelect=document.getElementById("resolution");
-const timeLimitSelect=document.getElementById("timeLimit");
-const fpsSelect=document.getElementById("fpsSelect");
+const fileInput = document.getElementById("fileInput");
+const startBtn = document.getElementById("startBtn");
 
-const status=document.getElementById("status");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
-let SIZE=180;
+canvas.width = SIZE;
+canvas.height = SIZE;
 
-canvas.width=SIZE;
-canvas.height=SIZE;
+let video = document.createElement("video");
+video.muted = true;
 
-resolutionSelect.addEventListener("change",()=>{
-SIZE=Number(resolutionSelect.value);
-canvas.width=SIZE;
-canvas.height=SIZE;
-});
+let frames = [];
 
-let videoLoaded=false;
+fileInput.addEventListener("change", e=>{
+const file = e.target.files[0];
+if(!file) return;
 
-document.getElementById("upload").addEventListener("change",e=>{
-
-const file=e.target.files[0];
-if(!file)return;
-
-video.src=URL.createObjectURL(file);
+video.src = URL.createObjectURL(file);
 video.load();
-
-video.onloadedmetadata=()=>{
-videoLoaded=true;
-status.innerText="動画読み込み完了";
-};
-
 });
 
-function seekVideo(time){
+startBtn.onclick = async ()=>{
 
-return new Promise(resolve=>{
-video.currentTime=time;
-video.onseeked=()=>resolve();
+frames=[];
+
+const duration = video.duration;
+const totalFrames = Math.floor(duration * FPS);
+
+for(let i=0;i<totalFrames;i++){
+
+video.currentTime = i / FPS;
+
+await new Promise(resolve=>{
+video.onseeked = resolve;
 });
 
-}
+drawFrame();
 
-function rgbToScratchHSV1(r,g,b){
-
-r/=255;
-g/=255;
-b/=255;
-
-const max=Math.max(r,g,b);
-const min=Math.min(r,g,b);
-const d=max-min;
-
-let h=0;
-
-if(d!==0){
-
-if(max===r)h=(g-b)/d+(g<b?6:0);
-else if(max===g)h=(b-r)/d+2;
-else h=(r-g)/d+4;
+const img = ctx.getImageData(0,0,SIZE,SIZE);
+frames.push(img.data);
 
 }
 
-return{
-h:Math.round((h/6)*100),
-s:Math.round((max===0?0:d/max)*100),
-v:Math.round(max*100)
+console.log("frames:",frames.length);
+console.log("1frame pixels:",SIZE*SIZE);
+
 };
 
-}
-
-async function downloadZip(){
-
-if(!videoLoaded){
-alert("動画を読み込んで");
-return;
-}
-
-const FPS=Number(fpsSelect.value);
-
-let selected=timeLimitSelect.value;
-
-let maxTime;
-
-if(selected==="auto"){
-maxTime=Math.min(video.duration,100);
-}else{
-maxTime=Math.min(Number(selected),video.duration);
-}
-
-const totalFrames=Math.floor(maxTime*FPS);
-
-const framesPerFile=FPS*10;
-
-const zip=new JSZip();
-
-let frameIndex=0;
-
-for(let fileIndex=0;fileIndex<10;fileIndex++){
-
-if(frameIndex>=totalFrames)break;
-
-let data=[];
-
-if(fileIndex===0){
-
-data.push(FPS);
-data.push(SIZE);
-data.push(totalFrames);
-
-}
-
-let chunkFrames=Math.min(framesPerFile,totalFrames-frameIndex);
-
-for(let i=0;i<chunkFrames;i++){
-
-await seekVideo(frameIndex/FPS);
+function drawFrame(){
 
 ctx.fillStyle="white";
 ctx.fillRect(0,0,SIZE,SIZE);
@@ -227,25 +100,25 @@ let drawHeight;
 let offsetX=0;
 let offsetY=0;
 
-const videoRatio=video.videoHeight/video.videoWidth;
+if(video.videoWidth >= video.videoHeight){
 
-if(videoRatio<=1){
+// 横動画
+const scale = SIZE / video.videoWidth;
 
-const scale=SIZE/video.videoWidth;
+drawWidth = SIZE;
+drawHeight = Math.floor(video.videoHeight * scale);
 
-drawWidth=SIZE;
-drawHeight=Math.floor(video.videoHeight*scale);
-
-offsetY=Math.floor((SIZE-drawHeight)/2);
+offsetY = Math.floor((SIZE - drawHeight)/2);
 
 }else{
 
-const scale=SIZE/video.videoHeight;
+// 縦動画
+const scale = SIZE / video.videoHeight;
 
-drawHeight=SIZE;
-drawWidth=Math.floor(video.videoWidth*scale);
+drawHeight = SIZE;
+drawWidth = Math.floor(video.videoWidth * scale);
 
-offsetX=Math.floor((SIZE-drawWidth)/2);
+offsetX = Math.floor((SIZE - drawWidth)/2);
 
 }
 
@@ -256,54 +129,6 @@ offsetY,
 drawWidth,
 drawHeight
 );
-
-const pixels=ctx.getImageData(0,0,SIZE,SIZE).data;
-
-for(let p=0;p<pixels.length;p+=4){
-
-const hsv=rgbToScratchHSV1(
-pixels[p],
-pixels[p+1],
-pixels[p+2]
-);
-
-data.push(hsv.h);
-data.push(hsv.s);
-data.push(hsv.v);
-
-}
-
-frameIndex++;
-
-status.innerText=`処理中 ${frameIndex}/${totalFrames}`;
-
-}
-
-zip.file(
-`video_${fileIndex+1}.txt`,
-data.join("\n")
-);
-
-data=null;
-
-}
-
-status.innerText="ZIP圧縮中";
-
-const blob=await zip.generateAsync({
-type:"blob",
-compression:"DEFLATE",
-compressionOptions:{level:9}
-});
-
-const a=document.createElement("a");
-
-a.href=URL.createObjectURL(blob);
-a.download="scratch_video.zip";
-
-a.click();
-
-status.innerText="完了";
 
 }
 
