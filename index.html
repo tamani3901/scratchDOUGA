@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <style>
-
 body{
 font-family:sans-serif;
 text-align:center;
@@ -42,6 +41,15 @@ font-size:16px;
 margin:5px;
 }
 
+button:disabled,select:disabled{
+background:#777;
+}
+
+.warning{
+color:#ff6666;
+font-size:14px;
+display:none;
+}
 </style>
 </head>
 
@@ -53,8 +61,8 @@ margin:5px;
 
 解像度
 <select id="resolution">
-<option value="180">180×180</option>
 <option value="360">360×360</option>
+<option value="180">180×180</option>
 </select>
 
 <br><br>
@@ -76,6 +84,10 @@ FPS
 <option value="15">15</option>
 <option value="24">24</option>
 </select>
+
+<div id="fpsWarning" class="warning">
+高FPSはブラウザが重くなる可能性があります
+</div>
 
 <br>
 
@@ -100,23 +112,22 @@ FPS
 const canvas=document.getElementById("canvas");
 const ctx=canvas.getContext("2d",{willReadFrequently:true});
 const video=document.getElementById("video");
+const status=document.getElementById("status");
 
 const resolutionSelect=document.getElementById("resolution");
 const timeLimitSelect=document.getElementById("timeLimit");
 const fpsSelect=document.getElementById("fpsSelect");
 
-const status=document.getElementById("status");
-
-let SIZE=180;
-
-canvas.width=SIZE;
-canvas.height=SIZE;
+let SIZE=360;
 
 resolutionSelect.addEventListener("change",()=>{
 SIZE=Number(resolutionSelect.value);
 canvas.width=SIZE;
 canvas.height=SIZE;
 });
+
+canvas.width=SIZE;
+canvas.height=SIZE;
 
 let videoLoaded=false;
 
@@ -136,12 +147,10 @@ status.innerText="動画読み込み完了";
 });
 
 function seekVideo(time){
-
 return new Promise(resolve=>{
 video.currentTime=time;
 video.onseeked=()=>resolve();
 });
-
 }
 
 function rgbToScratchHSV1(r,g,b){
@@ -157,11 +166,9 @@ const d=max-min;
 let h=0;
 
 if(d!==0){
-
 if(max===r)h=(g-b)/d+(g<b?6:0);
 else if(max===g)h=(b-r)/d+2;
 else h=(r-g)/d+4;
-
 }
 
 return{
@@ -175,14 +182,15 @@ v:Math.round(max*100)
 async function downloadZip(){
 
 if(!videoLoaded){
-alert("動画を読み込んで");
+alert("動画読み込んで");
 return;
 }
+
+const zip=new JSZip();
 
 const FPS=Number(fpsSelect.value);
 
 let selected=timeLimitSelect.value;
-
 let maxTime;
 
 if(selected==="auto"){
@@ -193,71 +201,38 @@ maxTime=Math.min(Number(selected),video.duration);
 
 const totalFrames=Math.floor(maxTime*FPS);
 
-const framesPerFile=FPS*10;
+const scale=SIZE/video.videoWidth;
+const drawHeight=Math.floor(video.videoHeight*scale);
+const validHeight=Math.min(drawHeight,SIZE);
 
-const zip=new JSZip();
+const pixelsPerFrame=SIZE*validHeight;
+const valuesPerFrame=pixelsPerFrame*3;
+const valuesPerSecond=valuesPerFrame*FPS;
+const valuesPerFile=valuesPerSecond*10;
 
 let frameIndex=0;
+let fileIndex=0;
 
-for(let fileIndex=0;fileIndex<10;fileIndex++){
-
-if(frameIndex>=totalFrames)break;
+while(frameIndex<totalFrames){
 
 let data=[];
 
 if(fileIndex===0){
-
 data.push(FPS);
-data.push(SIZE);
+data.push(validHeight);
 data.push(totalFrames);
-
 }
 
-let chunkFrames=Math.min(framesPerFile,totalFrames-frameIndex);
+let currentValues=0;
 
-for(let i=0;i<chunkFrames;i++){
+while(frameIndex<totalFrames){
 
 await seekVideo(frameIndex/FPS);
 
-ctx.fillStyle="white";
-ctx.fillRect(0,0,SIZE,SIZE);
+ctx.clearRect(0,0,SIZE,SIZE);
+ctx.drawImage(video,0,0,SIZE,drawHeight);
 
-let drawWidth;
-let drawHeight;
-let offsetX=0;
-let offsetY=0;
-
-if(video.videoWidth>=video.videoHeight){
-
-// 横動画（余白なし）
-const scale=SIZE/video.videoHeight;
-
-drawHeight=SIZE;
-drawWidth=Math.floor(video.videoWidth*scale);
-
-offsetX=Math.floor((SIZE-drawWidth)/2);
-
-}else{
-
-// 縦動画（左右白余白）
-const scale=SIZE/video.videoWidth;
-
-drawWidth=SIZE;
-drawHeight=Math.floor(video.videoHeight*scale);
-
-offsetY=Math.floor((SIZE-drawHeight)/2);
-
-}
-
-ctx.drawImage(
-video,
-offsetX,
-offsetY,
-drawWidth,
-drawHeight
-);
-
-const pixels=ctx.getImageData(0,0,SIZE,SIZE).data;
+const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
 
 for(let p=0;p<pixels.length;p+=4){
 
@@ -273,9 +248,13 @@ data.push(hsv.v);
 
 }
 
+currentValues+=valuesPerFrame;
+
 frameIndex++;
 
 status.innerText=`処理中 ${frameIndex}/${totalFrames}`;
+
+if(currentValues>=valuesPerFile)break;
 
 }
 
@@ -285,6 +264,8 @@ data.join("\n")
 );
 
 data=null;
+
+fileIndex++;
 
 }
 
@@ -297,10 +278,8 @@ compressionOptions:{level:9}
 });
 
 const a=document.createElement("a");
-
 a.href=URL.createObjectURL(blob);
 a.download="scratch_video.zip";
-
 a.click();
 
 status.innerText="完了";
@@ -308,6 +287,5 @@ status.innerText="完了";
 }
 
 </script>
-
 </body>
 </html>
