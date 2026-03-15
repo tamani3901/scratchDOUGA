@@ -108,6 +108,7 @@ const fpsSelect=document.getElementById("fpsSelect");
 const status=document.getElementById("status");
 
 let SIZE=180;
+
 canvas.width=SIZE;
 canvas.height=SIZE;
 
@@ -221,16 +222,32 @@ await seekVideo(frameIndex/FPS);
 ctx.fillStyle="white";
 ctx.fillRect(0,0,SIZE,SIZE);
 
-const scale=Math.min(
-SIZE/video.videoWidth,
-SIZE/video.videoHeight
-);
+let drawWidth;
+let drawHeight;
+let offsetX=0;
+let offsetY=0;
 
-const drawWidth=Math.floor(video.videoWidth*scale);
-const drawHeight=Math.floor(video.videoHeight*scale);
+const videoRatio=video.videoHeight/video.videoWidth;
 
-const offsetX=Math.floor((SIZE-drawWidth)/2);
-const offsetY=Math.floor((SIZE-drawHeight)/2);
+if(videoRatio<=1){
+
+const scale=SIZE/video.videoWidth;
+
+drawWidth=SIZE;
+drawHeight=Math.floor(video.videoHeight*scale);
+
+offsetY=Math.floor((SIZE-drawHeight)/2);
+
+}else{
+
+const scale=SIZE/video.videoHeight;
+
+drawHeight=SIZE;
+drawWidth=Math.floor(video.videoWidth*scale);
+
+offsetX=Math.floor((SIZE-drawWidth)/2);
+
+}
 
 ctx.drawImage(
 video,
@@ -240,12 +257,7 @@ drawWidth,
 drawHeight
 );
 
-const pixels=ctx.getImageData(
-0,
-0,
-SIZE,
-SIZE
-).data;
+const pixels=ctx.getImageData(0,0,SIZE,SIZE).data;
 
 for(let p=0;p<pixels.length;p+=4){
 
