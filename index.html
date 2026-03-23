@@ -116,12 +116,12 @@ const scale=SIZE/video.videoWidth;
 const drawHeight=Math.floor(video.videoHeight*scale);
 const validHeight=Math.min(drawHeight,SIZE);
 
-// パレットとインデックスの抽出
 let colorPalette = [];
 let colorMap = new Map();
 let allFrameIndices = [];
 
-status.innerText = "全フレームを解析中...";
+// --- 解析フェーズ（全フレーム） ---
+status.innerText = "全フレームを解析してパレットを作成中...";
 for(let f=0; f<totalFrames; f++){
     await seekVideo(f/FPS);
     ctx.drawImage(video,0,0,SIZE,drawHeight);
@@ -141,36 +141,31 @@ for(let f=0; f<totalFrames; f++){
     status.innerText=`解析中 ${f+1}/${totalFrames}`;
 }
 
-// データ分割してZIP保存 (元の分割ロジック)
-const framesPerFile = 10 * FPS; // 10秒ごとに1ファイル
+// --- ① パレットファイルの作成 ---
+let paletteData = [];
+colorPalette.forEach(c => {
+    paletteData.push(c.h);
+    paletteData.push(c.s);
+    paletteData.push(c.v);
+});
+zip.file("palette.txt", paletteData.join("\n"));
+
+// --- ②③ 動画データファイルの作成（分割） ---
+const framesPerFile = 10 * FPS; 
 let fileIndex = 0;
 
 for (let i = 0; i < totalFrames; i += framesPerFile) {
-    let data = [];
+    let videoData = [];
     
-    // 最初のファイルの先頭にだけヘッダーとパレットを入れる
-    if (fileIndex === 0) {
-        data.push(FPS, validHeight, totalFrames);
-        
-        // ① 使う色のHSVを出す
-        colorPalette.forEach(c => {
-            data.push(c.h);
-            data.push(c.s);
-            data.push(c.v);
-        });
-        
-        // 区切りとしてパレットの総数を末尾に置くなどの処理はせず、
-        // Scratch側で「(全データ - ヘッダー) / 3」などで判別するか、
-        // 指示通り「HSVの後に数字」として続けます。
-    }
+    // 各動画ファイルの先頭には基本情報を入れる
+    videoData.push(FPS, validHeight, totalFrames);
 
-    // ②③ 対応した数字で動画データを出す
     let end = Math.min(i + framesPerFile, totalFrames);
     for (let f = i; f < end; f++) {
-        data.push(...allFrameIndices[f]);
+        videoData.push(...allFrameIndices[f]);
     }
 
-    zip.file(`video_${fileIndex+1}.txt`, data.join("\n"));
+    zip.file(`video_${fileIndex+1}.txt`, videoData.join("\n"));
     fileIndex++;
 }
 
@@ -178,7 +173,7 @@ status.innerText="ZIP圧縮中";
 const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:9}});
 const a=document.createElement("a");
 a.href=URL.createObjectURL(blob);
-a.download="scratch_video.zip";
+a.download="scratch_video_data.zip";
 a.click();
 status.innerText="完了";
 }
