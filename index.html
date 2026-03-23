@@ -10,7 +10,6 @@ body{font-family:sans-serif;text-align:center;background:#222;color:#fff;padding
 canvas{border:1px solid #555;background:white;image-rendering:pixelated;margin:20px 0;}
 button,select{background:#4C97FF;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-size:16px;margin:5px;}
 button:disabled,select:disabled{background:#777;}
-.warning{color:#ff6666;font-size:14px;display:none;}
 </style>
 </head>
 
@@ -117,80 +116,61 @@ const scale=SIZE/video.videoWidth;
 const drawHeight=Math.floor(video.videoHeight*scale);
 const validHeight=Math.min(drawHeight,SIZE);
 
-// 元のコードの「valuesPerFile」に相当する制限
-const pixelsPerFrame=SIZE*validHeight;
-const valuesPerFile=(pixelsPerFrame*FPS)*10; 
-
-let frameIndex=0;
-let fileIndex=0;
-
-// パレット管理用（ファイルが変わっても維持）
+// パレットとインデックスの抽出
 let colorPalette = [];
 let colorMap = new Map();
+let allFrameIndices = [];
 
-while(frameIndex<totalFrames){
-    let data=[];
+status.innerText = "全フレームを解析中...";
+for(let f=0; f<totalFrames; f++){
+    await seekVideo(f/FPS);
+    ctx.drawImage(video,0,0,SIZE,drawHeight);
+    const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
+    
+    let currentFrame = [];
+    for(let p=0; p<pixels.length; p+=4){
+        const hsv=rgbToScratchHSV1(pixels[p],pixels[p+1],pixels[p+2]);
+        const key = `${hsv.h},${hsv.s},${hsv.v}`;
+        if(!colorMap.has(key)){
+            colorMap.set(key, colorMap.size + 1);
+            colorPalette.push(hsv);
+        }
+        currentFrame.push(colorMap.get(key));
+    }
+    allFrameIndices.push(currentFrame);
+    status.innerText=`解析中 ${f+1}/${totalFrames}`;
+}
 
-    // 最初のファイルにだけヘッダー情報を入れる（元の構造維持）
-    if(fileIndex===0){
-        data.push(FPS);
-        data.push(validHeight);
-        data.push(totalFrames);
+// データ分割してZIP保存 (元の分割ロジック)
+const framesPerFile = 10 * FPS; // 10秒ごとに1ファイル
+let fileIndex = 0;
+
+for (let i = 0; i < totalFrames; i += framesPerFile) {
+    let data = [];
+    
+    // 最初のファイルの先頭にだけヘッダーとパレットを入れる
+    if (fileIndex === 0) {
+        data.push(FPS, validHeight, totalFrames);
+        
+        // ① 使う色のHSVを出す
+        colorPalette.forEach(c => {
+            data.push(c.h);
+            data.push(c.s);
+            data.push(c.v);
+        });
+        
+        // 区切りとしてパレットの総数を末尾に置くなどの処理はせず、
+        // Scratch側で「(全データ - ヘッダー) / 3」などで判別するか、
+        // 指示通り「HSVの後に数字」として続けます。
     }
 
-    let currentValues=0;
-    while(frameIndex<totalFrames){
-        await seekVideo(frameIndex/FPS);
-        ctx.clearRect(0,0,SIZE,SIZE);
-        ctx.drawImage(video,0,0,SIZE,drawHeight);
-        const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
-
-        // ①使う色のHSVを抽出
-        let frameIndices = [];
-        for(let p=0; p<pixels.length; p+=4){
-            const hsv=rgbToScratchHSV1(pixels[p],pixels[p+1],pixels[p+2]);
-            const key = `${hsv.h},${hsv.s},${hsv.v}`;
-            
-            if(!colorMap.has(key)){
-                colorMap.set(key, colorMap.size + 1);
-                colorPalette.push(hsv);
-            }
-            frameIndices.push(colorMap.get(key));
-        }
-
-        // ここで一旦「現時点でのパレット」を先頭に入れるか検討が必要ですが、
-        // 全ファイルで共通のパレットを参照する場合、最後にまとめて出すか、
-        // もしくは毎フレームのインデックスを貯める必要があります。
-        // ここでは「各ファイル内」でその時までのパレット＋インデックスを出す形にします。
-        
-        // データの構築： [パレットのHSV...] [このフレームのインデックス...]
-        // ※ご指定の「①HSVを出して②数字を出して③動画データ」の順序を守ります
-        
-        // ただし分割ファイルの場合、各ファイルにパレットを含めないとScratch側で番号がズレるため
-        // ファイルごとに「その時点のパレット数」と「パレット本体」を先頭に付与します。
-        
-        let tempFileData = [];
-        // パレット情報
-        tempFileData.push(colorPalette.length); 
-        colorPalette.forEach(c => {
-            tempFileData.push(c.h);
-            tempFileData.push(c.s);
-            tempFileData.push(c.v);
-        });
-        // インデックス情報
-        frameIndices.forEach(idx => tempFileData.push(idx));
-
-        data.push(...tempFileData);
-        
-        currentValues += pixelsPerFrame; // カウント
-        frameIndex++;
-        status.innerText=`処理中 ${frameIndex}/${totalFrames}`;
-
-        if(currentValues >= valuesPerFile) break;
+    // ②③ 対応した数字で動画データを出す
+    let end = Math.min(i + framesPerFile, totalFrames);
+    for (let f = i; f < end; f++) {
+        data.push(...allFrameIndices[f]);
     }
 
     zip.file(`video_${fileIndex+1}.txt`, data.join("\n"));
-    data=null;
     fileIndex++;
 }
 
