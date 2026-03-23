@@ -1,292 +1,240 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>Scratch Video Converter</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
-<style>
-body{
-font-family:sans-serif;
-text-align:center;
-background:#222;
-color:#fff;
-padding:20px;
-}
-
-.container{
-background:#333;
-padding:20px;
-border-radius:10px;
-display:inline-block;
-border:2px solid #4C97FF;
-}
-
-canvas{
-border:1px solid #555;
-background:white;
-image-rendering:pixelated;
-margin:20px 0;
-}
-
-button,select{
-background:#4C97FF;
-color:white;
-border:none;
-padding:10px 20px;
-border-radius:5px;
-cursor:pointer;
-font-size:16px;
-margin:5px;
-}
-
-button:disabled,select:disabled{
-background:#777;
-}
-
-.warning{
-color:#ff6666;
-font-size:14px;
-display:none;
-}
-</style>
+    <meta charset="UTF-8">
+    <title>Scratch Video to Indexed Text</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            background: #1e1e1e;
+            color: #eee;
+            padding: 20px;
+        }
+        .container {
+            background: #2d2d2d;
+            padding: 30px;
+            border-radius: 15px;
+            display: inline-block;
+            border: 2px solid #4C97FF;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        canvas {
+            border: 2px solid #444;
+            background: white;
+            image-rendering: pixelated;
+            margin: 20px 0;
+            max-width: 100%;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            text-align: left;
+            margin-bottom: 20px;
+        }
+        label { font-size: 14px; color: #aaa; }
+        button, select, input {
+            background: #4C97FF;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+        }
+        input[type="file"] { background: #3e3e3e; }
+        button:hover { background: #357ae8; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #FFD500;
+        }
+    </style>
 </head>
-
 <body>
 
 <div class="container">
+    <h2>Scratch動画変換 (パレット方式)</h2>
+    
+    <div class="controls">
+        <div>
+            <label>解像度</label>
+            <select id="resolution">
+                <option value="48">48×48 (推奨)</option>
+                <option value="100">100×100</option>
+                <option value="180">180×180</option>
+                <option value="360">360×360</option>
+            </select>
+        </div>
+        <div>
+            <label>FPS</label>
+            <select id="fpsSelect">
+                <option value="5">5 FPS</option>
+                <option value="10" selected>10 FPS</option>
+                <option value="15">15 FPS</option>
+                <option value="30">30 FPS</option>
+            </select>
+        </div>
+        <div>
+            <label>秒数制限</label>
+            <select id="timeLimit">
+                <option value="3">3秒</option>
+                <option value="5">5秒</option>
+                <option value="10">10秒</option>
+                <option value="all" selected>全編</option>
+            </select>
+        </div>
+        <div>
+            <label>動画ファイル</label>
+            <input type="file" id="upload" accept="video/*">
+        </div>
+    </div>
 
-<h2>Scratch 動画→テキスト変換</h2>
-
-解像度
-<select id="resolution">
-<option value="360">360×360</option>
-<option value="180">180×180</option>
-</select>
-
-<br><br>
-
-秒数
-<select id="timeLimit">
-<option value="5">5秒</option>
-<option value="10">10秒</option>
-<option value="15">15秒</option>
-<option value="100">100秒</option>
-<option value="all" selected>動画の長さ（全て）</option>
-</select>
-
-<br><br>
-
-FPS
-<select id="fpsSelect">
-<option value="10">10</option>
-<option value="15">15</option>
-<option value="24">24</option>
-</select>
-
-<div id="fpsWarning" class="warning">
-高FPSはブラウザが重くなる可能性があります
-</div>
-
-<br>
-
-<input type="file" id="upload" accept="video/*">
-
-<br>
-
-<canvas id="canvas"></canvas>
-
-<br>
-
-<button onclick="downloadZip()">ZIP保存</button>
-
-<p id="status">動画を選択</p>
-
+    <canvas id="canvas"></canvas>
+    <br>
+    <button id="convertBtn" onclick="processVideo()">変換してZIP保存</button>
+    <p id="status">動画を選択してください</p>
 </div>
 
 <video id="video" style="display:none"></video>
 
 <script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const video = document.getElementById("video");
+const status = document.getElementById("status");
+const convertBtn = document.getElementById("convertBtn");
 
-const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d",{willReadFrequently:true});
-const video=document.getElementById("video");
-const status=document.getElementById("status");
+let SIZE = 48;
+document.getElementById("resolution").addEventListener("change", (e) => {
+    SIZE = Number(e.target.value);
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+});
+canvas.width = SIZE;
+canvas.height = SIZE;
 
-const resolutionSelect=document.getElementById("resolution");
-const timeLimitSelect=document.getElementById("timeLimit");
-const fpsSelect=document.getElementById("fpsSelect");
+let videoLoaded = false;
 
-let SIZE=360;
-
-resolutionSelect.addEventListener("change",()=>{
-SIZE=Number(resolutionSelect.value);
-canvas.width=SIZE;
-canvas.height=SIZE;
+document.getElementById("upload").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    video.src = URL.createObjectURL(file);
+    video.load();
+    video.onloadedmetadata = () => {
+        videoLoaded = true;
+        status.innerText = "動画読み込み完了。変換ボタンを押してください。";
+    };
 });
 
-canvas.width=SIZE;
-canvas.height=SIZE;
-
-let videoLoaded=false;
-
-document.getElementById("upload").addEventListener("change",e=>{
-
-const file=e.target.files[0];
-if(!file)return;
-
-video.src=URL.createObjectURL(file);
-video.load();
-
-video.onloadedmetadata=()=>{
-videoLoaded=true;
-status.innerText="動画読み込み完了";
-};
-
-});
-
-function seekVideo(time){
-return new Promise(resolve=>{
-video.currentTime=time;
-video.onseeked=()=>resolve();
-});
+function seekVideo(time) {
+    return new Promise(resolve => {
+        video.currentTime = time;
+        const onSeeked = () => {
+            video.removeEventListener("seeked", onSeeked);
+            resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+    });
 }
 
-function rgbToScratchHSV1(r,g,b){
-
-r/=255;
-g/=255;
-b/=255;
-
-const max=Math.max(r,g,b);
-const min=Math.min(r,g,b);
-const d=max-min;
-
-let h=0;
-
-if(d!==0){
-if(max===r)h=(g-b)/d+(g<b?6:0);
-else if(max===g)h=(b-r)/d+2;
-else h=(r-g)/d+4;
+function rgbToScratchHSV(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d !== 0) {
+        if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+    }
+    // Scratchの仕様に合わせた 0-100 スケール
+    return {
+        h: Math.round((h / 6) * 100),
+        s: Math.round((max === 0 ? 0 : d / max) * 100),
+        v: Math.round(max * 100)
+    };
 }
 
-return{
-h:Math.round((h/6)*100),
-s:Math.round((max===0?0:d/max)*100),
-v:Math.round(max*100)
-};
+async function processVideo() {
+    if (!videoLoaded) { alert("先に動画を読み込んでください"); return; }
+    
+    convertBtn.disabled = true;
+    const zip = new JSZip();
+    const FPS = Number(document.getElementById("fpsSelect").value);
+    const selected = document.getElementById("timeLimit").value;
+    const maxTime = (selected === "all") ? video.duration : Math.min(Number(selected), video.duration);
+    const totalFrames = Math.floor(maxTime * FPS);
 
+    const scale = SIZE / video.videoWidth;
+    const drawHeight = Math.floor(video.videoHeight * scale);
+    const validHeight = Math.min(drawHeight, SIZE);
+
+    let colorPalette = []; 
+    let colorMap = new Map(); 
+    let framePixelIndices = []; 
+
+    // 1. 各フレームを解析してパレットとインデックスを作成
+    for (let f = 0; f < totalFrames; f++) {
+        await seekVideo(f / FPS);
+        ctx.clearRect(0, 0, SIZE, SIZE);
+        ctx.drawImage(video, 0, 0, SIZE, drawHeight);
+        
+        const pixels = ctx.getImageData(0, 0, SIZE, validHeight).data;
+        let currentFrameIndices = [];
+
+        for (let p = 0; p < pixels.length; p += 4) {
+            const hsv = rgbToScratchHSV(pixels[p], pixels[p+1], pixels[p+2]);
+            // 色の解像度を少し落としてパレット爆発を防ぐ (微調整可能)
+            const key = `${hsv.h},${hsv.s},${hsv.v}`;
+
+            if (!colorMap.has(key)) {
+                colorMap.set(key, colorMap.size + 1); // 1から始まるインデックス
+                colorPalette.push(hsv);
+            }
+            currentFrameIndices.push(colorMap.get(key));
+        }
+        framePixelIndices.push(currentFrameIndices);
+        status.innerText = `解析中... ${f + 1} / ${totalFrames} フレーム`;
+    }
+
+    // 2. データ結合
+    // フォーマット:
+    // [FPS, 高さ, 総フレーム数, パレット色数, パレットH1, S1, V1, ..., 画素1インデックス, 画素2...]
+    let output = [];
+    output.push(FPS);
+    output.push(validHeight);
+    output.push(totalFrames);
+    
+    // パレット数
+    output.push(colorPalette.length);
+    // パレットのHSVデータ
+    colorPalette.forEach(c => {
+        output.push(c.h);
+        output.push(c.s);
+        output.push(c.v);
+    });
+    // 全フレームのピクセルインデックス
+    framePixelIndices.forEach(indices => {
+        output.push(...indices);
+    });
+
+    status.innerText = "ZIPファイルを作成中...";
+    zip.file("video_data.txt", output.join("\n"));
+
+    const blob = await zip.generateAsync({type: "blob", compression: "DEFLATE"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "scratch_video_data.zip";
+    a.click();
+
+    status.innerText = "完了！ZIPをダウンロードしました。";
+    convertBtn.disabled = false;
 }
-
-async function downloadZip(){
-
-if(!videoLoaded){
-alert("動画読み込んで");
-return;
-}
-
-const zip=new JSZip();
-
-const FPS=Number(fpsSelect.value);
-
-let selected=timeLimitSelect.value;
-let maxTime;
-
-// 修正箇所: "all" の場合は動画の長さそのまま、それ以外は従来通り制限をかける
-if(selected==="all"){
-maxTime=video.duration;
-}else{
-maxTime=Math.min(Number(selected),video.duration);
-}
-
-const totalFrames=Math.floor(maxTime*FPS);
-
-const scale=SIZE/video.videoWidth;
-const drawHeight=Math.floor(video.videoHeight*scale);
-const validHeight=Math.min(drawHeight,SIZE);
-
-const pixelsPerFrame=SIZE*validHeight;
-const valuesPerFrame=pixelsPerFrame*3;
-const valuesPerSecond=valuesPerFrame*FPS;
-const valuesPerFile=valuesPerSecond*10;
-
-let frameIndex=0;
-let fileIndex=0;
-
-while(frameIndex<totalFrames){
-
-let data=[];
-
-if(fileIndex===0){
-data.push(FPS);
-data.push(validHeight);
-data.push(totalFrames);
-}
-
-let currentValues=0;
-
-while(frameIndex<totalFrames){
-
-await seekVideo(frameIndex/FPS);
-
-ctx.clearRect(0,0,SIZE,SIZE);
-ctx.drawImage(video,0,0,SIZE,drawHeight);
-
-const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
-
-for(let p=0;p<pixels.length;p+=4){
-
-const hsv=rgbToScratchHSV1(
-pixels[p],
-pixels[p+1],
-pixels[p+2]
-);
-
-data.push(hsv.h);
-data.push(hsv.s);
-data.push(hsv.v);
-
-}
-
-currentValues+=valuesPerFrame;
-
-frameIndex++;
-
-status.innerText=`処理中 ${frameIndex}/${totalFrames}`;
-
-if(currentValues>=valuesPerFile)break;
-
-}
-
-zip.file(
-`video_${fileIndex+1}.txt`,
-data.join("\n")
-);
-
-data=null;
-
-fileIndex++;
-
-}
-
-status.innerText="ZIP圧縮中";
-
-const blob=await zip.generateAsync({
-type:"blob",
-compression:"DEFLATE",
-compressionOptions:{level:9}
-});
-
-const a=document.createElement("a");
-a.href=URL.createObjectURL(blob);
-a.download="scratch_video.zip";
-a.click();
-
-status.innerText="完了";
-
-}
-
 </script>
+
 </body>
 </html>
