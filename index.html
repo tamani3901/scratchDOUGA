@@ -120,8 +120,8 @@ let colorPalette = [];
 let colorMap = new Map();
 let allFrameIndices = [];
 
-// --- 解析フェーズ（全フレーム） ---
-status.innerText = "全フレームを解析してパレットを作成中...";
+// --- 1. 解析フェーズ ---
+status.innerText = "解析中...";
 for(let f=0; f<totalFrames; f++){
     await seekVideo(f/FPS);
     ctx.drawImage(video,0,0,SIZE,drawHeight);
@@ -141,36 +141,35 @@ for(let f=0; f<totalFrames; f++){
     status.innerText=`解析中 ${f+1}/${totalFrames}`;
 }
 
-// --- ① パレットファイルの作成 ---
-let paletteData = [];
-colorPalette.forEach(c => {
-    paletteData.push(c.h);
-    paletteData.push(c.s);
-    paletteData.push(c.v);
-});
-zip.file("palette.txt", paletteData.join("\n"));
+// --- 2. ファイル書き出し ---
 
-// --- ②③ 動画データファイルの作成（分割） ---
-const framesPerFile = 10 * FPS; 
+// ① 使う色のHSVリスト (3つずつ並ぶ)
+let hsvText = colorPalette.map(c => `${c.h}\n${c.s}\n${c.v}`).join("\n");
+zip.file("hsv_list.txt", hsvText);
+
+// ② 対応する数字のリスト (1, 2, 3...)
+let indexText = "";
+for(let i=1; i<=colorPalette.length; i++){
+    indexText += i + "\n";
+}
+zip.file("index_list.txt", indexText.trim());
+
+// ③ 動画データ (分割保存)
+const framesPerFile = 10 * FPS;
 let fileIndex = 0;
-
 for (let i = 0; i < totalFrames; i += framesPerFile) {
     let videoData = [];
-    
-    // 各動画ファイルの先頭には基本情報を入れる
-    videoData.push(FPS, validHeight, totalFrames);
-
+    if (fileIndex === 0) videoData.push(FPS, validHeight, totalFrames);
     let end = Math.min(i + framesPerFile, totalFrames);
     for (let f = i; f < end; f++) {
         videoData.push(...allFrameIndices[f]);
     }
-
     zip.file(`video_${fileIndex+1}.txt`, videoData.join("\n"));
     fileIndex++;
 }
 
-status.innerText="ZIP圧縮中";
-const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:9}});
+status.innerText="圧縮中...";
+const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE"});
 const a=document.createElement("a");
 a.href=URL.createObjectURL(blob);
 a.download="scratch_video_data.zip";
