@@ -9,11 +9,12 @@ body{font-family:sans-serif;text-align:center;background:#222;color:#fff;padding
 .container{background:#333;padding:20px;border-radius:10px;display:inline-block;border:2px solid #4C97FF;}
 canvas{border:1px solid #555;background:white;image-rendering:pixelated;margin:20px 0;}
 button,select{background:#4C97FF;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-size:16px;margin:5px;}
+button:disabled,select:disabled{background:#777;}
 .warning{color:#ff6666;font-size:14px;display:none;}
 </style>
 </head>
-<body>
 
+<body>
 <div class="container">
 <h2>Scratch 動画→テキスト変換</h2>
 解像度
@@ -116,50 +117,82 @@ const scale=SIZE/video.videoWidth;
 const drawHeight=Math.floor(video.videoHeight*scale);
 const validHeight=Math.min(drawHeight,SIZE);
 
-let colorPalette = []; // パレット
-let colorMap = new Map(); // 色->番号用
-let videoIndices = []; // 全フレームのインデックス
+// 元のコードの「valuesPerFile」に相当する制限
+const pixelsPerFrame=SIZE*validHeight;
+const valuesPerFile=(pixelsPerFrame*FPS)*10; 
 
-// --- 解析フェーズ ---
-for(let f=0; f<totalFrames; f++){
-    await seekVideo(f/FPS);
-    ctx.clearRect(0,0,SIZE,SIZE);
-    ctx.drawImage(video,0,0,SIZE,drawHeight);
-    const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
-    
-    for(let p=0; p<pixels.length; p+=4){
-        const hsv=rgbToScratchHSV1(pixels[p],pixels[p+1],pixels[p+2]);
-        const key = `${hsv.h},${hsv.s},${hsv.v}`;
-        
-        if(!colorMap.has(key)){
-            colorMap.set(key, colorMap.size + 1); // 番号を振る
-            colorPalette.push(hsv); // パレットに追加
-        }
-        videoIndices.push(colorMap.get(key)); // 番号を記録
+let frameIndex=0;
+let fileIndex=0;
+
+// パレット管理用（ファイルが変わっても維持）
+let colorPalette = [];
+let colorMap = new Map();
+
+while(frameIndex<totalFrames){
+    let data=[];
+
+    // 最初のファイルにだけヘッダー情報を入れる（元の構造維持）
+    if(fileIndex===0){
+        data.push(FPS);
+        data.push(validHeight);
+        data.push(totalFrames);
     }
-    status.innerText=`処理中 ${f+1}/${totalFrames}`;
+
+    let currentValues=0;
+    while(frameIndex<totalFrames){
+        await seekVideo(frameIndex/FPS);
+        ctx.clearRect(0,0,SIZE,SIZE);
+        ctx.drawImage(video,0,0,SIZE,drawHeight);
+        const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
+
+        // ①使う色のHSVを抽出
+        let frameIndices = [];
+        for(let p=0; p<pixels.length; p+=4){
+            const hsv=rgbToScratchHSV1(pixels[p],pixels[p+1],pixels[p+2]);
+            const key = `${hsv.h},${hsv.s},${hsv.v}`;
+            
+            if(!colorMap.has(key)){
+                colorMap.set(key, colorMap.size + 1);
+                colorPalette.push(hsv);
+            }
+            frameIndices.push(colorMap.get(key));
+        }
+
+        // ここで一旦「現時点でのパレット」を先頭に入れるか検討が必要ですが、
+        // 全ファイルで共通のパレットを参照する場合、最後にまとめて出すか、
+        // もしくは毎フレームのインデックスを貯める必要があります。
+        // ここでは「各ファイル内」でその時までのパレット＋インデックスを出す形にします。
+        
+        // データの構築： [パレットのHSV...] [このフレームのインデックス...]
+        // ※ご指定の「①HSVを出して②数字を出して③動画データ」の順序を守ります
+        
+        // ただし分割ファイルの場合、各ファイルにパレットを含めないとScratch側で番号がズレるため
+        // ファイルごとに「その時点のパレット数」と「パレット本体」を先頭に付与します。
+        
+        let tempFileData = [];
+        // パレット情報
+        tempFileData.push(colorPalette.length); 
+        colorPalette.forEach(c => {
+            tempFileData.push(c.h);
+            tempFileData.push(c.s);
+            tempFileData.push(c.v);
+        });
+        // インデックス情報
+        frameIndices.forEach(idx => tempFileData.push(idx));
+
+        data.push(...tempFileData);
+        
+        currentValues += pixelsPerFrame; // カウント
+        frameIndex++;
+        status.innerText=`処理中 ${frameIndex}/${totalFrames}`;
+
+        if(currentValues >= valuesPerFile) break;
+    }
+
+    zip.file(`video_${fileIndex+1}.txt`, data.join("\n"));
+    data=null;
+    fileIndex++;
 }
-
-// --- データ出力フェーズ ---
-let data = [];
-// 基本情報
-data.push(FPS);
-data.push(validHeight);
-data.push(totalFrames);
-
-// ① 使う色のHSV形式データ
-colorPalette.forEach(c => {
-    data.push(c.h);
-    data.push(c.s);
-    data.push(c.v);
-});
-
-// ② ③ 対応した数字（インデックス）で動画データ
-videoIndices.forEach(idx => {
-    data.push(idx);
-});
-
-zip.file(`video_data.txt`, data.join("\n"));
 
 status.innerText="ZIP圧縮中";
 const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:9}});
