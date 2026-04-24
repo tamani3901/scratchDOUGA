@@ -116,23 +116,23 @@ const scale=SIZE/video.videoWidth;
 const drawHeight=Math.floor(video.videoHeight*scale);
 const validHeight=Math.min(drawHeight,SIZE);
 
-let colorPalette = [];
-let colorMap = new Map();
-let allFrameIndices = [];
+let colorPalette=[];
+let colorMap=new Map();
+let allFrameIndices=[];
 
-// --- 1. 解析フェーズ ---
-status.innerText = "解析中...";
+// --- 解析 ---
+status.innerText="解析中...";
 for(let f=0; f<totalFrames; f++){
     await seekVideo(f/FPS);
     ctx.drawImage(video,0,0,SIZE,drawHeight);
     const pixels=ctx.getImageData(0,0,SIZE,validHeight).data;
-    
-    let currentFrame = [];
+
+    let currentFrame=[];
     for(let p=0; p<pixels.length; p+=4){
         const hsv=rgbToScratchHSV1(pixels[p],pixels[p+1],pixels[p+2]);
-        const key = `${hsv.h},${hsv.s},${hsv.v}`;
+        const key=`${hsv.h},${hsv.s},${hsv.v}`;
         if(!colorMap.has(key)){
-            colorMap.set(key, colorMap.size + 1);
+            colorMap.set(key,colorMap.size+1);
             colorPalette.push(hsv);
         }
         currentFrame.push(colorMap.get(key));
@@ -141,30 +141,33 @@ for(let f=0; f<totalFrames; f++){
     status.innerText=`解析中 ${f+1}/${totalFrames}`;
 }
 
-// --- 2. ファイル書き出し ---
+// --- 書き出し ---
 
-// ① 使う色のHSVリスト (3つずつ並ぶ)
-let hsvText = colorPalette.map(c => `${c.h}\n${c.s}\n${c.v}`).join("\n");
-zip.file("hsv_list.txt", hsvText);
+// HSV（1列）
+let hsvText=colorPalette.map(c=>`${c.h},${c.s},${c.v}`).join("|");
+zip.file("hsv_list.txt",hsvText);
 
-// ② 対応する数字のリスト (1, 2, 3...)
-let indexText = "";
-for(let i=1; i<=colorPalette.length; i++){
-    indexText += i + "\n";
+// index（1列）
+let indexText="";
+for(let i=1;i<=colorPalette.length;i++){
+    indexText+=i+"|";
 }
-zip.file("index_list.txt", indexText.trim());
+zip.file("index_list.txt",indexText.slice(0,-1));
 
-// ③ 動画データ (分割保存)
-const framesPerFile = 10 * FPS;
-let fileIndex = 0;
-for (let i = 0; i < totalFrames; i += framesPerFile) {
-    let videoData = [];
-    if (fileIndex === 0) videoData.push(FPS, validHeight, totalFrames);
-    let end = Math.min(i + framesPerFile, totalFrames);
-    for (let f = i; f < end; f++) {
+// 動画データ（1列）
+const framesPerFile=10*FPS;
+let fileIndex=0;
+
+for(let i=0;i<totalFrames;i+=framesPerFile){
+    let videoData=[];
+    if(fileIndex===0) videoData.push(FPS,validHeight,totalFrames);
+
+    let end=Math.min(i+framesPerFile,totalFrames);
+    for(let f=i;f<end;f++){
         videoData.push(...allFrameIndices[f]);
     }
-    zip.file(`video_${fileIndex+1}.txt`, videoData.join("\n"));
+
+    zip.file(`video_${fileIndex+1}.txt`,videoData.join("|"));
     fileIndex++;
 }
 
@@ -174,6 +177,7 @@ const a=document.createElement("a");
 a.href=URL.createObjectURL(blob);
 a.download="scratch_video_data.zip";
 a.click();
+
 status.innerText="完了";
 }
 </script>
